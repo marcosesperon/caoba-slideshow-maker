@@ -2,8 +2,10 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const fs = require('fs');
+// NUEVO: Importar exif-parser
+const exifParser = require('exif-parser');
 
-const execOptions = { maxBuffer: 1024 * 1024 * 200 }; 
+const execOptions = { maxBuffer: 1024 * 1024 * 500 }; 
 
 const ffmpegPath = require('ffmpeg-static').replace('app.asar', 'app.asar.unpacked'); 
 const ffprobePath = require('ffprobe-static').path.replace('app.asar', 'app.asar.unpacked');;
@@ -12,12 +14,17 @@ let mainWindow;
 let currentFFmpegProcess = null;
 let isCancelled = false;
 
+// NUEVO: Variable global para almacenar la lista de archivos ORDENADA
+let currentSortedFiles = [];
+// Variable para recordar la carpeta actual (para el CWD de FFmpeg)
+let currentFolderRoot = "";
+
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 520, height: 700, // Un poco más de altura para el nuevo campo
-        autoHideMenuBar: true,
+        width: 520, height: 700,
         resizable: false,
+        autoHideMenuBar: true,
         icon: path.join(__dirname, 'build', 'icon.png'),
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
@@ -36,24 +43,41 @@ function timeToSeconds(timeString) {
     return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
 }
 
-function getJpgFiles(folder) {
+// NUEVO: Función auxiliar para obtener la fecha de captura (EXIF o Sistema)
+function getFileCreationDate(filePath) {
     try {
-        // 1. Leemos todos los archivos de la carpeta
+        // 1. Intentamos leer EXIF (es síncrono, rápido para archivos locales)
+        const buffer = fs.readFileSync(filePath);
+        const parser = exifParser.create(buffer);
+        const result = parser.parse();
+        
+        // DateTimeOriginal es la fecha de captura real. CreateDate es secundaria.
+        // exif-parser devuelve timestamps en segundos, multiplicamos por 1000 para JS.
+        const exifTimestamp = result.tags.DateTimeOriginal || result.tags.CreateDate;
+        
+        if (exifTimestamp) {
+            return new Date(exifTimestamp * 1000);
+        }
+    } catch (e) {
+        // Si falla EXIF (no tiene metadatos o no es un JPG estándar), ignoramos y seguimos.
+    }
+
+    // 2. Fallback: Usar fechas del sistema de archivos
+    const stats = fs.statSync(filePath);
+    // 'birthtime' es fecha de creación (mejor), 'mtime' es modificación (peor caso)
+    return stats.birthtime || stats.mtime;
+}
+
+
+// Función auxiliar básica para obtener solo los nombres (usada internamente por el escaneador)
+function getRawJpgFilenames(folder) {
+    try {
         const allFiles = fs.readdirSync(folder);
-
-        // 2. Aplicamos el filtro
         return allFiles.filter(file => {
-            // Condición A: Debe terminar en .jpg o .JPG
-            const isJpgExtension = file.toLowerCase().endsWith('.jpg');
-            
-            // Condición B: NO debe empezar por "._" (archivos de metadatos de macOS)
-            // Tampoco debería empezar por "." en general (archivos ocultos del sistema como .DS_Store)
+            const isJpgExtension = file.toLowerCase().endsWith('.jpg') || file.toLowerCase().endsWith('.jpeg');
             const isHiddenOrMetadata = file.startsWith('.');
-
-            // El archivo es válido si cumple A y NO cumple B
             return isJpgExtension && !isHiddenOrMetadata;
         });
-
     } catch (e) {
         console.error("Error leyendo directorio:", e);
         return []; 
@@ -75,7 +99,8 @@ function getAudioDuration(filePath) {
     });
 }
 
-// --- MANEJADORES ---
+// --- MANEJADORES IPC ---
+
 ipcMain.handle('dialog:select-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
     return result.filePaths[0];
@@ -89,32 +114,56 @@ ipcMain.handle('dialog:select-file', async () => {
     return result.filePaths[0];
 });
 
-// NUEVO: Manejador para el diálogo "Guardar como..."
 ipcMain.handle('dialog:save-file', async () => {
     const result = await dialog.showSaveDialog(mainWindow, {
         title: 'Guardar Video Final',
-        defaultPath: 'caoba_slideshow.mp4',
+        defaultPath: 'mi_slideshow.mp4',
         filters: [{ name: 'Video MP4', extensions: ['mp4'] }]
     });
-    // Si el usuario cancela, filePath es undefined, devolvemos null
     return result.canceled ? null : result.filePath;
 });
 
+// NUEVO: Manejador principal para ESCANEAR Y ORDENAR
+ipcMain.handle('util:scan-and-sort', async (event, folder, sortMode) => {
+    currentFolderRoot = folder; // Guardamos la raíz para luego
+    const rawFilenames = getRawJpgFilenames(folder);
+    
+    if (rawFilenames.length < 2) {
+        currentSortedFiles = [];
+        return 0;
+    }
 
-ipcMain.handle('util:count-photos', async (event, folder) => {
-    return getJpgFiles(folder).length;
+    console.log(`Escaneando ${rawFilenames.length} fotos. Modo: ${sortMode}`);
+
+    if (sortMode === 'name') {
+        // Ordenación alfabética simple (insensible a mayúsculas)
+        currentSortedFiles = rawFilenames.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    } else if (sortMode === 'date') {
+        // Ordenación por fecha (EXIF preferente)
+        // Creamos un array temporal de objetos { nombre, fecha } para ordenar eficientemente
+        const filesWithDate = rawFilenames.map(filename => ({
+            name: filename,
+            date: getFileCreationDate(path.join(folder, filename))
+        }));
+
+        // Ordenamos basándonos en el objeto Date (de más antiguo a más nuevo)
+        filesWithDate.sort((a, b) => a.date - b.date);
+
+        // Extraemos solo los nombres ya ordenados
+        currentSortedFiles = filesWithDate.map(f => f.name);
+    }
+    
+    // Devolvemos los ficheros para que el frontend lo sepa
+    return currentSortedFiles;
 });
+
 
 ipcMain.handle('action:cancel', async () => {
     if (currentFFmpegProcess && currentFFmpegProcess.pid) {
         console.log(`Solicitada cancelación forzada del PID: ${currentFFmpegProcess.pid}`);
         isCancelled = true;
         if (process.platform === 'win32') {
-            try {
-                spawn('taskkill', ['/pid', currentFFmpegProcess.pid, '/f', '/t']);
-            } catch (e) {
-                currentFFmpegProcess.kill(); 
-            }
+            try { spawn('taskkill', ['/pid', currentFFmpegProcess.pid, '/f', '/t']); } catch (e) { currentFFmpegProcess.kill(); }
         } else {
             currentFFmpegProcess.kill('SIGKILL');
         }
@@ -124,31 +173,30 @@ ipcMain.handle('action:cancel', async () => {
 
 
 // ==================================================================
-//  MOTOR CENTRAL V8 (CON RUTA DE DESTINO PERSONALIZADA)
+//  MOTOR CENTRAL V11 (USA LA LISTA PRE-ORDENADA)
 // ==================================================================
-// Ahora recibimos 'destinationPath'
-ipcMain.handle('action:generate-multi', async (event, { folder, musicData, durationPerPhoto, useVisualTransition, videoFormat, destinationPath }) => {
+// Nota: Ya no recibimos 'folder' en los argumentos, usamos las variables globales.
+ipcMain.handle('action:generate-multi', async (event, { musicData, durationPerPhoto, useVisualTransition, videoFormat, destinationPath }) => {
     return new Promise(async (resolve) => { 
         
         currentFFmpegProcess = null;
         isCancelled = false;
+        
+        // Usamos las variables globales llenadas en el paso anterior
+        const folder = currentFolderRoot;
+        // CAMBIO CLAVE: Usamos la lista que ya ordenamos previamente
+        const files = currentSortedFiles; 
 
         const outputFile = destinationPath;
-        // Archivos temporales
-        const listFileSimple = path.join(folder, 'temp_input_list.txt');
-        // NUEVO: Archivo temporal para argumentos largos
-        const argsFileComplex = path.join(folder, 'temp_ffmpeg_args.txt');
+        const filterScriptFile = path.join(folder, 'temp_filter_script.txt');
 
-        // Limpieza inicial
         if (fs.existsSync(outputFile)) try { fs.unlinkSync(outputFile); } catch(e){}
-        if (fs.existsSync(listFileSimple)) try { fs.unlinkSync(listFileSimple); } catch(e){}
-        if (fs.existsSync(argsFileComplex)) try { fs.unlinkSync(argsFileComplex); } catch(e){}
+        if (fs.existsSync(filterScriptFile)) try { fs.unlinkSync(filterScriptFile); } catch(e){}
 
         try {
-            const files = getJpgFiles(folder);
-            if (files.length < 2) throw new Error("Se necesitan al menos 2 imágenes");
+            // Validación de seguridad por si acaso
+            if (!folder || files.length < 2) throw new Error("Error de estado: No hay archivos seleccionados u ordenados.");
 
-            // === DEFINIR RESOLUCIÓN OBJETIVO ===
             let targetW, targetH;
             switch (videoFormat) {
                 case '916_v': targetW = 1080; targetH = 1920; break;
@@ -176,10 +224,9 @@ ipcMain.handle('action:generate-multi', async (event, { folder, musicData, durat
                 for (let i = 0; i < musicData.length; i++) {
                     if (isCancelled) throw new Error("Cancelado por el usuario.");
                     const track = musicData[i];
-                    let startTimeSec = 0; let duration = 0;
+                    let duration = 0;
                     try { duration = await getAudioDuration(track.path); } catch (e) { throw new Error(`Error leyendo pista ${i+1}.`); }
-                    if (track.mode === 'manual') { startTimeSec = track.startPhotoIndex * secPerPhoto; } 
-                    else { startTimeSec = Math.max(0, currentAudioTailTime - audioCrossfadeDuration); }
+                    let startTimeSec = (track.mode === 'manual') ? track.startPhotoIndex * secPerPhoto : Math.max(0, currentAudioTailTime - audioCrossfadeDuration);
                     currentAudioTailTime = startTimeSec + duration;
                     calculatedMusicData.push({ path: track.path, startTimeSec: startTimeSec });
                 }
@@ -187,157 +234,122 @@ ipcMain.handle('action:generate-multi', async (event, { folder, musicData, durat
 
             if (isCancelled) throw new Error("Cancelado por el usuario.");
 
-            // BIFURCACIÓN: MODO SIMPLE vs COMPLEJO
-            if (!hasAudio && !useVisualTransition) {
-                console.log(">>> USANDO MODO SIMPLE (ATAJO) <<<");
-                let fileContent = '';
-                files.forEach((file) => {
-                    const fullPath = path.join(folder, file).replace(/\\/g, '/');
-                    fileContent += `file '${fullPath}'\nduration ${secPerPhoto}\n`;
-                });
-                const lastPath = path.join(folder, files[files.length-1]).replace(/\\/g, '/');
-                fileContent += `file '${lastPath}'\n`;
-                fs.writeFileSync(listFileSimple, fileContent);
+            // ==================================================================
+            // CONSTRUCCIÓN DEL COMANDO
+            // ==================================================================
+            console.log(`>>> GENERANDO COMANDO CON ${files.length} FOTOS ORDENADAS <<<`);
+            
+            let inputStr = ""; 
+            let filterComplex = "";
+            const videoInputCount = files.length;
+            const d_show = secPerPhoto + videoTransDuration; 
+            
+            const normalizeForCmd = (p) => p.split(path.sep).join('/');
 
-                const cmdString = `"${ffmpegPath}" -y -f concat -safe 0 -i "${listFileSimple}" -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,format=yuv420p" -c:v libx264 -pix_fmt yuv420p -shortest "${outputFile}"`;
-                                
-                console.log("Iniciando FFmpeg (Modo Simple)...");
-                currentFFmpegProcess = spawn(cmdString, { shell: true });
+            // 1. INPUTS DE VIDEO (Usando la lista 'files' que ya está ordenada)
+            files.forEach(file => { 
+                inputStr += ` -loop 1 -t ${d_show} -i "${file}"`; 
+            });
 
-            } else {
-                console.log(">>> USANDO MODO COMPLEJO (FILTER_COMPLEX) <<<");
-                let inputStr = ""; let filterComplex = "";
-                const videoInputCount = files.length;
-                const d_show = secPerPhoto + videoTransDuration; 
-                                
-                // Usamos path.posix.join y .replace para asegurar barras inclinadas (/) incluso en Windows,
-                // ya que funcionan mejor dentro de archivos de argumentos de FFmpeg.
-                const normalizePath = (p) => p.split(path.sep).join('/');
-
-                files.forEach(file => { 
-                    inputStr += ` -loop 1 -t ${d_show} -i "${normalizePath(path.join(folder, file))}"`; 
-                });
-                if (hasAudio) { 
-                    calculatedMusicData.forEach((track) => { 
-                        inputStr += ` -stream_loop -1 -i "${normalizePath(track.path)}"`; 
-                    }); 
-                }
-
-                for (let i = 0; i < videoInputCount; i++) { 
-                    filterComplex += `[${i}]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25,format=yuv420p[vPre${i}];`; 
-                }
-                if (useVisualTransition) {
-                    let offset = secPerPhoto;
-                    for (let i = 0; i < videoInputCount - 1; i++) {
-                        const input1 = (i === 0) ? `[vPre0]` : `[vMix${i}]`; const input2 = `[vPre${i+1}]`; const output = (i === files.length - 2) ? `[vFinalVideo]` : `[vMix${i+1}]`;
-                        filterComplex += `${input1}${input2}xfade=transition=fade:duration=${videoTransDuration}:offset=${offset}${output};`;
-                        offset += secPerPhoto;
-                    }
-                } else {
-                    for (let i = 0; i < videoInputCount; i++) { filterComplex += `[vPre${i}]`; }
-                    filterComplex += `concat=n=${videoInputCount}:v=1:a=0[vFinalVideo];`;
-                }
-
-                if (hasAudio) {
-                    let audioInputsCount = calculatedMusicData.length;
-                    if (audioInputsCount === 1) { filterComplex += `[${videoInputCount}:a]anull[aFinalAudio];`; } else {
-                        let previousAudioLabel = `[${videoInputCount}:a]`; 
-                        for (let i = 1; i < audioInputsCount; i++) {
-                            const currentTrackMeta = calculatedMusicData[i];
-                            const startTimeSec = currentTrackMeta.startTimeSec;
-                            const currentAudioInputStr = `[${videoInputCount + i}:a]`;
-                            const nextLabel = (i === audioInputsCount - 1) ? `[aFinalAudio]` : `[aMix${i}]`;
-                            const trimDuration = startTimeSec + audioCrossfadeDuration;
-                            filterComplex += `${previousAudioLabel}atrim=duration=${trimDuration},asetpts=PTS-STARTPTS[aTrimmed${i}];`;
-                            filterComplex += `[aTrimmed${i}]${currentAudioInputStr}acrossfade=d=${audioCrossfadeDuration}${nextLabel};`;
-                            previousAudioLabel = nextLabel;
-                        }
-                    }
-                }
-                if (filterComplex.endsWith(';')) filterComplex = filterComplex.slice(0, -1);
-
-                const audioMapCmd = hasAudio ? '-map "[aFinalAudio]"' : '';
-                
-                // ===== NUEVO: TÉCNICA @FILE PARA COMANDOS LARGOS =====
-                                
-                // 1. Construimos el string GIGANTE de solo argumentos (sin el ejecutable ffmpeg delante)
-                const argsOnlyString = `-y ${inputStr} -filter_complex "${filterComplex}" -map "[vFinalVideo]" ${audioMapCmd} -c:v libx264 -pix_fmt yuv420p -t ${totalVideoDuration} "${normalizePath(outputFile)}"\n`;
-
-                // 2. Lo escribimos en un archivo temporal
-                fs.writeFileSync(argsFileComplex, argsOnlyString);
-
-                console.log("Comando largo detectado. Usando archivo de argumentos (@file).");
-                console.log("Archivo de argumentos guardado en:", argsFileComplex);
-
-                // 3. Ejecutamos FFmpeg pasándole solo el archivo con @
-                // IMPORTANTE: shell: false aquí es más seguro y directo
-                currentFFmpegProcess = spawn(ffmpegPath, ['@' + argsFileComplex], { shell: false });
+            // 2. INPUTS DE AUDIO
+            if (hasAudio) { 
+                calculatedMusicData.forEach((track) => { 
+                    inputStr += ` -stream_loop -1 -i "${normalizeForCmd(track.path)}"`; 
+                }); 
             }
 
-            /*currentFFmpegProcess.stderr.on('data', (data) => {
-                const text = data.toString();
-                const match = text.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
-                if (match && match[1]) {
-                    const currentSeconds = timeToSeconds(match[1]);
-                    const percent = (currentSeconds / totalVideoDuration) * 100;
-                    mainWindow.webContents.send('conversion:progress', Math.min(Math.round(percent), 99));
+            // 3. CONSTRUIR EL GRAFO DE FILTROS (Igual que antes)
+            for (let i = 0; i < videoInputCount; i++) { 
+                filterComplex += `[${i}]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25,format=yuv420p[vPre${i}];`; 
+            }
+            if (useVisualTransition) {
+                let offset = secPerPhoto;
+                for (let i = 0; i < videoInputCount - 1; i++) {
+                    const input1 = (i === 0) ? `[vPre0]` : `[vMix${i}]`; const input2 = `[vPre${i+1}]`; const output = (i === files.length - 2) ? `[vFinalVideo]` : `[vMix${i+1}]`;
+                    filterComplex += `${input1}${input2}xfade=transition=fade:duration=${videoTransDuration}:offset=${offset}${output};`;
+                    offset += secPerPhoto;
                 }
+            } else {
+                for (let i = 0; i < videoInputCount; i++) { filterComplex += `[vPre${i}]`; }
+                filterComplex += `concat=n=${videoInputCount}:v=1:a=0[vFinalVideo];`;
+            }
+
+            if (hasAudio) {
+                let audioInputsCount = calculatedMusicData.length;
+                if (audioInputsCount === 1) { filterComplex += `[${videoInputCount}:a]anull[aFinalAudio];`; } else {
+                    let previousAudioLabel = `[${videoInputCount}:a]`; 
+                    for (let i = 1; i < audioInputsCount; i++) {
+                        const currentTrackMeta = calculatedMusicData[i];
+                        const nextLabel = (i === audioInputsCount - 1) ? `[aFinalAudio]` : `[aMix${i}]`;
+                        const trimDuration = currentTrackMeta.startTimeSec + audioCrossfadeDuration;
+                        filterComplex += `${previousAudioLabel}atrim=duration=${trimDuration},asetpts=PTS-STARTPTS[aTrimmed${i}];`;
+                        filterComplex += `[aTrimmed${i}][${videoInputCount + i}:a]acrossfade=d=${audioCrossfadeDuration}${nextLabel};`;
+                        previousAudioLabel = nextLabel;
+                    }
+                }
+            }
+            if (filterComplex.endsWith(';')) filterComplex = filterComplex.slice(0, -1);
+
+
+            // GUARDAR SCRIPT
+            fs.writeFileSync(filterScriptFile, filterComplex, { encoding: 'utf8' });
+
+            const audioMapCmd = hasAudio ? '-map "[aFinalAudio]"' : '';
+            
+            // COMANDO FINAL
+            const cmdString = `"${ffmpegPath}" -y ${inputStr} -filter_complex_script "${normalizeForCmd(filterScriptFile)}" -map "[vFinalVideo]" ${audioMapCmd} -c:v libx264 -pix_fmt yuv420p -t ${totalVideoDuration} "${normalizeForCmd(outputFile)}"`;
+
+            console.log("Iniciando FFmpeg (con CWD y lista ordenada)...");
+            console.log("Comando: ", cmdString);
+            
+            currentFFmpegProcess = spawn(cmdString, { 
+                shell: true,
+                cwd: folder // Usamos la carpeta raíz guardada
             });
 
-            currentFFmpegProcess.on('close', (code) => {
-                console.log(`Proceso FFmpeg terminado con código: ${code}`);
-                currentFFmpegProcess = null;
-                if (fs.existsSync(listFile)) try { fs.unlinkSync(listFile); } catch(e){}
 
-                if (isCancelled) {
-                    resolve({ success: false, error: "Cancelado por el usuario." });
-                } else if (code === 0) {
-                    // Devolvemos la ruta final que eligió el usuario
-                    resolve({ success: true, path: outputFile });
-                } else {
-                    resolve({ success: false, error: "Error en el renderizado. Revisa la consola." });
-                }
-            });*/
-
-            // NUEVO: Variable para guardar TODO el log de errores
-            let fullErrorLog = ""; 
-
+            // --- MANEJO COMÚN DE SALIDA Y ERRORES (MEJORADO) ---
             currentFFmpegProcess.stderr.on('data', (data) => {
                 const text = data.toString();
-                
-                // NUEVO: Acumulamos el texto en nuestra variable de log
-                fullErrorLog += text + "\n"; 
-
-                // (El código de la barra de progreso sigue igual)
+                // Buscamos el tiempo actual en el log de FFmpeg
                 const match = text.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
                 if (match && match[1]) {
                     const currentSeconds = timeToSeconds(match[1]);
-                    const percent = (currentSeconds / totalVideoDuration) * 100;
-                    mainWindow.webContents.send('conversion:progress', Math.min(Math.round(percent), 99));
+                    let percent = (currentSeconds / totalVideoDuration) * 100;
+                    percent = Math.min(Math.round(percent), 99); // Limitar a 99%
+
+                    // === NUEVO: CÁLCULO DEL FICHERO ACTUAL ===
+                    // Calculamos el índice aproximado basado en el progreso actual.
+                    // Usamos Math.floor para obtener el índice entero (0, 1, 2...).
+                    let currentIndex = Math.floor((currentSeconds / totalVideoDuration) * files.length);
+                    
+                    // Aseguramos que el índice no se salga del array (por si el tiempo se pasa un poco)
+                    currentIndex = Math.min(currentIndex, files.length - 1);
+                    
+                    // Obtenemos el nombre del fichero usando la lista ordenada 'files'
+                    // Usamos path.basename para mostrar solo "foto.jpg" y no toda la ruta "C:/Users/..."
+                    const currentFileName = path.basename(files[currentIndex]);
+
+                    // CAMBIO IMPORTANTE: Ahora enviamos un OBJETO con dos datos
+                    mainWindow.webContents.send('conversion:progress', {
+                        percent: percent,
+                        file: currentFileName
+                    });
+                    // ==========================================
                 }
             });
 
             currentFFmpegProcess.on('close', (code) => {
                 console.log(`Proceso FFmpeg terminado con código: ${code}`);
                 currentFFmpegProcess = null;
-                if (fs.existsSync(listFileSimple)) try { fs.unlinkSync(listFileSimple); } catch(e){}
-                if (fs.existsSync(argsFileComplex)) try { fs.unlinkSync(argsFileComplex); } catch(e){}
+                if (fs.existsSync(filterScriptFile)) try { fs.unlinkSync(filterScriptFile); } catch(e){}
 
                 if (isCancelled) {
                     resolve({ success: false, error: "Cancelado por el usuario." });
                 } else if (code === 0) {
                     resolve({ success: true, path: outputFile });
                 } else {
-                    // === AQUÍ ESTÁ LA CLAVE ===
-                    // Si el código NO es 0, imprimimos el log completo que hemos guardado
-                    console.error("---------------------------------------------------");
-                    console.error("!!! ERROR FATAL DE FFMPEG !!!");
-                    console.error("Aquí está el log completo para que veas el error real:");
-                    console.error(fullErrorLog);
-                    console.error("---------------------------------------------------");
-                    
-                    // Devolvemos un mensaje genérico al usuario, pero nosotros miramos la consola
-                    resolve({ success: false, error: "Error técnico en el motor de video. Revisa la consola de desarrollador para ver los detalles." });
+                    resolve({ success: false, error: "Error técnico en el motor de video. Revisa la consola de desarrollo para detalles." });
                 }
             });
 

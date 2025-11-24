@@ -8,7 +8,11 @@ const statusDiv = document.getElementById('status');
 const statusText = document.getElementById('statusText');
 const musicListDiv = document.getElementById('musicList');
 const photoCountInfo = document.getElementById('photoCountInfo');
-const destPathInput = document.getElementById('destPath'); // NUEVO: Input destino
+const destPathInput = document.getElementById('destPath');
+const sortOptionsDiv = document.getElementById('sortOptions');
+const sortRadioButtons = document.querySelectorAll('input[name="sortMode"]');
+const fileListContainer = document.getElementById('fileListContainer');
+const fileListPreview = document.getElementById('fileListPreview');
 
 const progressBar = document.getElementById('progressBar');
 const progressText = document.getElementById('progressText');
@@ -16,8 +20,40 @@ const progressText = document.getElementById('progressText');
 let totalPhotos = 0;
 let musicTracks = []; 
 let isGenerating = false; 
+let currentFolderPath = "";
 
 // --- FUNCIONES DE INTERFAZ ---
+// NUEVO: Función para renderizar la lista de archivos en el DOM
+function renderFilePreview(filesList) {
+    fileListPreview.innerHTML = ''; // Limpiar anterior
+
+    if (!filesList || filesList.length === 0) {
+        fileListContainer.style.display = 'none';
+        return;
+    }
+
+    // Usamos un DocumentFragment para mejorar el rendimiento al insertar muchos elementos
+    const fragment = document.createDocumentFragment();
+
+    filesList.forEach((fileName, index) => {
+        const row = document.createElement('div');
+        // Estilo de fila alterno para facilitar la lectura
+        row.style.padding = '3px 5px';
+        if (index % 2 === 0) row.style.backgroundColor = '#fff';
+        
+        // Formato: "1. nombre_archivo.jpg"
+        // Usamos padStart para alinear los números (001, 002...) si hay muchas fotos
+        const indexStr = (index + 1).toString().padStart(filesList.length.toString().length, '0');
+        
+        row.innerText = `${indexStr}. ${fileName}`;
+        fragment.appendChild(row);
+    });
+
+    fileListPreview.appendChild(fragment);
+    fileListContainer.style.display = 'block';
+    // Scroll al principio
+    fileListPreview.scrollTop = 0;
+}
 
 function addMusicRow(filePath, isFirst = false) {
     const rowId = Date.now();
@@ -97,6 +133,69 @@ function updateUIState() {
     btnGenerate.disabled = totalPhotos === 0 || !hasDest || isGenerating;
     document.querySelectorAll('.btn-delete').forEach(btn => btn.disabled = isGenerating);
     btnSelectDest.disabled = isGenerating;
+    btnFolder.disabled = isGenerating;
+    sortRadioButtons.forEach(radio => radio.disabled = isGenerating);
+}
+
+// renderer.js
+
+// NUEVO: Función centralizada para escanear fotos (VERSIÓN ROBUSTA CON TRY/CATCH)
+async function scanPhotosInFolder(folderPath) {
+    if (!folderPath) return;
+    currentFolderPath = folderPath;
+    document.getElementById('folderPath').value = folderPath;
+    
+    statusText.innerText = "Analizando y ordenando fotos...";
+    statusDiv.className = "alert alert-soft";
+    photoCountInfo.innerText = "⏳ Escaneando...";
+    
+    // Deshabilitamos opciones mientras escanea
+    sortRadioButtons.forEach(radio => radio.disabled = true);
+
+    renderFilePreview([]);
+
+    try {
+        // Obtenemos el modo de ordenación actual
+        // (Si es la primera vez, cogerá el que esté 'checked' por defecto en el HTML)
+        const sortModeElement = document.querySelector('input[name="sortMode"]:checked');
+        const sortMode = sortModeElement ? sortModeElement.value : 'name';
+
+        // --- PUNTO CRÍTICO: Aquí es donde se quedaba colgado ---
+        // Intentamos la llamada, y si falla, saltamos al 'catch'
+        const sortedFilesList = await window.api.scanAndSortFiles(folderPath, sortMode);
+        totalPhotos = sortedFilesList.length;
+        
+        // Si llegamos aquí, todo ha ido bien
+        if (totalPhotos < 2) {
+            photoCountInfo.innerText = `Se encontraron ${totalPhotos} fotos válidas. Se necesitan al menos 2.`;
+            photoCountInfo.className = "text-error";
+            totalPhotos = 0;
+            sortOptionsDiv.style.display = "none"; 
+            renderFilePreview([]);
+        } else {
+            photoCountInfo.innerText = `${totalPhotos} fotos válidas (Ordenado por: ${sortMode === 'name' ? 'Nombre' : 'Fecha'}).`;
+            photoCountInfo.className = "text-success"; 
+            sortOptionsDiv.style.display = "flex"; 
+            renderFilePreview(sortedFilesList);
+        }
+        statusText.innerText = "";
+        statusDiv.className = "hidden";
+
+    } catch (error) {
+        // --- CAPTURA DEL ERROR ---
+        console.error("Error durante el escaneo:", error);
+        photoCountInfo.innerText = "Error al analizar la carpeta.";
+        photoCountInfo.className = "text-error"; 
+        statusText.innerText = `Error técnico:\n${error.message}`;
+        statusDiv.className = "alert alert-soft alert-error";
+        totalPhotos = 0;
+        sortOptionsDiv.style.display = "none";
+        renderFilePreview([]);
+    } finally {
+        // Pase lo que pase, reactivamos los controles de UI
+        sortRadioButtons.forEach(radio => radio.disabled = false);
+        updateUIState();
+    }
 }
 
 // --- EVENT LISTENERS ---
@@ -114,30 +213,24 @@ btnFolder.addEventListener('click', async () => {
     if (isGenerating) return;
     const path = await window.api.selectFolder();
     if (path) {
-        document.getElementById('folderPath').value = path;
-        statusText.innerHTML = "Analizando carpeta...";
-        totalPhotos = await window.api.countPhotos(path);
-        if (totalPhotos < 2) {
-            photoCountInfo.innerText = `⚠️ Se encontraron ${totalPhotos} fotos. Se necesitan al menos 2.`;
-            photoCountInfo.className = "text-error"; totalPhotos = 0;
-        } else {
-            photoCountInfo.innerText = `${totalPhotos} imágenes válidas encontradas.`;
-            photoCountInfo.className = "text-accent"; 
-        }
         musicListDiv.innerHTML = ''; musicTracks = [];
-        
-        // AUTO-SUGERENCIA: Al elegir carpeta, sugerimos un nombre de archivo ahí
         if (!destPathInput.value) {
-             // Necesitamos una forma de obtener el separador de ruta del sistema (trick)
-             const isWin = navigator.userAgent.includes('Windows');
-             const sep = isWin ? '\\' : '/';
-             // Ruta de carpeta + separador + nombre por defecto
-             const suggestedPath = path + sep + "caoba_slideshow.mp4";
-             destPathInput.value = suggestedPath;
+             const isWin = navigator.userAgent.includes('Windows'); const sep = isWin ? '\\' : '/';
+             destPathInput.value = path + sep + "mi_slideshow.mp4";
         }
-        
-        updateUIState();
+        // Usamos la nueva función centralizada
+        scanPhotosInFolder(path);
     }
+});
+
+// NUEVO: Listener para cambio de ordenación
+sortRadioButtons.forEach(radio => {
+    radio.addEventListener('change', () => {
+        if (currentFolderPath && !isGenerating) {
+            // Si cambiamos el radio, re-escaneamos la carpeta actual
+            scanPhotosInFolder(currentFolderPath);
+        }
+    });
 });
 
 // NUEVO: Listener para el botón de destino
@@ -157,9 +250,14 @@ btnAddMusic.addEventListener('click', async () => {
     if (path) addMusicRow(path, musicTracks.length === 0);
 });
 
-window.api.onProgress((porcentaje) => {
-    progressBar.value = porcentaje;
-    progressText.innerText = Math.round(porcentaje) + "%";
+window.api.onProgress((data) => {
+    // 1. Actualizamos la barra como siempre
+    progressBar.value = data.percent;
+    progressText.innerText = Math.round(data.percent) + "%";
+
+    // 2. NUEVO: Actualizamos el texto de estado con el fichero
+    // Usamos un icono de reloj de arena para indicar proceso
+    statusText.innerText = `⏳ Procesando imagen: ${data.file}`;
 });
 
 btnGenerate.addEventListener('click', async () => {
@@ -205,7 +303,6 @@ btnGenerate.addEventListener('click', async () => {
 
     // Enviamos la nueva propiedad 'destinationPath'
     const result = await window.api.generateVideoMultiAudio({
-        folder,
         musicData: finalMusicData, 
         durationPerPhoto,
         useVisualTransition,
@@ -219,7 +316,7 @@ btnGenerate.addEventListener('click', async () => {
 
     if (result.success) {
         // Usamos la ruta real de destino en el mensaje de éxito
-        statusText.innerText = `🎉 ¡Video completado!\nGuardado en:\n${result.path}`;
+        statusText.innerText = `🎉 ¡Video completado!\n${result.path}`;
         statusDiv.className = "alert alert-soft alert-success";
         progressBar.value = 100;
         progressText.innerText = "100%";

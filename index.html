@@ -17,7 +17,26 @@
                 <input type="text" class="input grow join-item" id="folderPath" placeholder="Selecciona la carpeta con los JPG..." readonly>
                 <button id="btnSelectFolder" class="btn join-item bg-primary"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h5l2 3h9a2 2 0 0 1 2 2v2M19 15v6M16 18h6"/></svg></button>
             </div>
-            <span id="photoCountInfo" class="text-accent">Ninguna carpeta seleccionada</small>
+
+            <span id="photoCountInfo" class="text-accent">Ninguna carpeta seleccionada</span>
+
+            <div id="sortOptions" style="display: none; font-size: 0.9em; background: #f0f2f5; padding: 5px 10px; border-radius: 6px;">
+                  <span style="margin-right: 10px; font-weight: 600; color: #555;">Ordenar por:</span>
+                  <label style="display: inline-flex; align-items: center; margin-right: 15px; cursor: pointer; font-weight: normal;">
+                      <input type="radio" name="sortMode" value="name" checked style="margin-right: 5px;"> Nombre
+                  </label>
+                  <label style="display: inline-flex; align-items: center; cursor: pointer; font-weight: normal;">
+                      <input type="radio" name="sortMode" value="date" style="margin-right: 5px;"> Fecha (EXIF)
+                  </label>
+              </div>
+
+              <div id="fileListContainer" style="display: none; margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+                <span style="font-size: 0.9em; font-weight: 600; color: #555; display: block; margin-bottom: 8px;">Vista previa del orden secuencial:</span>
+                <div id="fileListPreview" style="max-height: 180px; overflow-y: auto; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #e1e4e8; font-family: monospace; font-size: 0.85em; color: #333;">
+                    </div>
+                <small style="color: #888; display: block; margin-top: 5px;">Desplázate para ver todas las imágenes.</small>
+            </div>
+            
         </fieldset>
 
         <fieldset class="fieldset bg-base-200 border-base-300 rounded-box border p-4">
@@ -81,7 +100,7 @@
         </div>
 
         <div class="p-4">
-          <div id="status" class="alert alert-soft"><span id="statusText"></span></div>
+          <div id="status" class="hidden"><span id="statusText"></span></div>
         </div>
 
         <div class="flex justify-center py-2 mx-4">
