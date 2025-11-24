@@ -164,7 +164,7 @@ async function scanPhotosInFolder(folderPath) {
         // Intentamos la llamada, y si falla, saltamos al 'catch'
         const sortedFilesList = await window.api.scanAndSortFiles(folderPath, sortMode);
         totalPhotos = sortedFilesList.length;
-        
+
         // Si llegamos aquí, todo ha ido bien
         if (totalPhotos < 2) {
             photoCountInfo.innerText = `Se encontraron ${totalPhotos} fotos válidas. Se necesitan al menos 2.`;
@@ -216,7 +216,7 @@ btnFolder.addEventListener('click', async () => {
         musicListDiv.innerHTML = ''; musicTracks = [];
         if (!destPathInput.value) {
              const isWin = navigator.userAgent.includes('Windows'); const sep = isWin ? '\\' : '/';
-             destPathInput.value = path + sep + "mi_slideshow.mp4";
+             destPathInput.value = path + sep + "caoba_slideshow.mp4";
         }
         // Usamos la nueva función centralizada
         scanPhotosInFolder(path);

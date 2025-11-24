@@ -117,7 +117,7 @@ ipcMain.handle('dialog:select-file', async () => {
 ipcMain.handle('dialog:save-file', async () => {
     const result = await dialog.showSaveDialog(mainWindow, {
         title: 'Guardar Video Final',
-        defaultPath: 'mi_slideshow.mp4',
+        defaultPath: 'caoba_slideshow.mp4',
         filters: [{ name: 'Video MP4', extensions: ['mp4'] }]
     });
     return result.canceled ? null : result.filePath;

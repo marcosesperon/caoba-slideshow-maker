@@ -1,6 +1,6 @@
 {
   "name": "CAOBA-Slideshow-Maker",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "CAOBA Slideshow Maker - Crea presentaciones de diapositivas en video a partir de imágenes JPG con múltiples pistas de audio.",
   "author": "Marcos Esperón",
   "main": "main.js",
