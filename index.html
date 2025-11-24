@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html data-theme="autumn">
+<head>
+    <title>CAOBA Slideshow Maker</title>
+    <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="flex justify-center glass sticky p-2 top-0 z-2">
+        <h2 class="font-title text-2xl md:text-3xl lg:text-4xl font-bold text-center">CAOBA Slideshow Maker</h2>
+
+  </div>
+    <div class="gap-4 p-6 max-w-3xl mx-auto">
+        
+        <fieldset class="fieldset bg-base-200 border-base-300 rounded-box border p-4">
+          <legend class="fieldset-legend">Origen de las Imágenes</legend>
+           <div class="join">
+                <input type="text" class="input grow join-item" id="folderPath" placeholder="Selecciona la carpeta con los JPG..." readonly>
+                <button id="btnSelectFolder" class="btn join-item bg-primary"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h5l2 3h9a2 2 0 0 1 2 2v2M19 15v6M16 18h6"/></svg></button>
+            </div>
+            <span id="photoCountInfo" class="text-accent">Ninguna carpeta seleccionada</small>
+        </fieldset>
+
+        <fieldset class="fieldset bg-base-200 border-base-300 rounded-box border p-4">
+          <legend class="fieldset-legend">Configuración del Vídeo</legend>
+
+          <div class="flex flex-row justify-between">
+            <label class="flex flex-col">
+              <span>Segundos por foto:</span>
+              <input type="number" id="duration" value="4" min="1" step="0.5" class="input" />
+            </label>
+
+            <label class="label">
+              <input type="checkbox" id="chkTransition" class="checkbox" />
+              Transiciones visuales suaves
+            </label>
+          </div>
+      
+          <div class="flex flex-col grow">
+              <label>Formato de salida:</label>
+              <select id="videoFormat" class="select grow">
+                  <optgroup label="Formatos Estándar (TV/Móvil)">
+                      <option value="169_h" selected>Horizontal Panorámico (16:9)</option>
+                      <option value="916_v">Vertical Historias/Reels (9:16)</option>
+                  </optgroup>
+                  <optgroup label="Formatos Fotográficos/Feed">
+                      <option value="45_v">Vertical Feed/Instagram (4:5)</option>
+                      <option value="45_h">Horizontal Feed (5:4)</option>
+                      <option value="23_v">Vertical Clásico (2:3)</option>
+                      <option value="23_h">Horizontal Clásico (3:2)</option>
+                  </optgroup>
+              </select>
+          </div>
+
+        </fieldset>
+
+        <fieldset class="fieldset bg-base-200 border-base-300 rounded-box border p-4">
+          <legend class="fieldset-legend">Banda Sonora (Mezcla Avanzada)</legend>
+            
+            <span class="text-secondary">Añade canciones y decide cuándo empieza cada una.</span>
+            
+            <div id="musicList"></div>
+
+            <button id="btnAddMusic" class="btn btn-soft" disabled>
+                Añadir Pista de Audio
+            </button>
+        </fieldset>
+
+        <fieldset class="fieldset bg-base-200 border-base-300 rounded-box border p-4">
+          <legend class="fieldset-legend">Destino</legend>
+            <span class="text-secondary">Elige dónde quieres guardar el archivo de video resultante.</span>
+            
+            <div class="join min-w-max">
+                <input type="text" id="destPath" class="input grow join-item" placeholder="Ruta y nombre del archivo de salida (.mp4)..." readonly>
+                <button id="btnSelectDest" class="btn join-item bg-primary"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg></button>
+            </div>
+        </div>
+
+        <div class="flex justify-center items-center py-2 px-8">
+          <progress id="progressBar" class="progress progress-success" value="0" max="100"></progress>
+          <div id="progressText" class="text-xs ml-2">0%</div>
+        </div>
+
+        <div class="p-4">
+          <div id="status" class="alert alert-soft"><span id="statusText"></span></div>
+        </div>
+
+        <div class="flex justify-center py-2 mx-4">
+          <button id="btnCancel" class="btn btn-secondary grow" style="display: none;">CANCELAR</button>
+        </div>
+        <div class="flex justify-center glass sticky inset-x-0 bottom-0">
+          <div class="grow flex py-2 mx-4">
+            <button id="btnGenerate" class="btn btn-primary grow">GENERAR VIDEO</button>
+          </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
