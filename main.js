@@ -1,9 +1,12 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
+const { spawn, execFile, exec } = require('child_process');
 const fs = require('fs');
-// NUEVO: Importar exif-parser
 const exifParser = require('exif-parser');
+
+const sharp = require('sharp');
+// Usamos la versión 'promises' de fs para usar await cómodamente
+const fsPromises = require('fs').promises;
 
 const execOptions = { maxBuffer: 1024 * 1024 * 500 }; 
 
@@ -22,7 +25,7 @@ let currentFolderRoot = "";
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 520, height: 700,
+        width: 520, height: 800,
         resizable: false,
         autoHideMenuBar: true,
         icon: path.join(__dirname, 'build', 'icon.png'),
@@ -362,4 +365,88 @@ ipcMain.handle('action:generate-multi', async (event, { musicData, durationPerPh
             resolve({ success: false, error: err.message });
         }
     });
+});
+
+
+
+// ==================================================================
+//  NUEVA ACCIÓN: REDIMENSIONAR IMÁGENES 
+// ==================================================================
+ipcMain.handle('action:resize-images', async (event, folderPath, dimensionStr, saveMode) => {
+    console.log(`Iniciando redimensionado en: ${folderPath}. Dim: ${dimensionStr}px. Modo: ${saveMode}`);
+    
+    try {
+        const dimension = parseInt(dimensionStr);
+        if (isNaN(dimension) || dimension < 10) throw new Error("Dimensión no válida");
+
+        const allFiles = await fsPromises.readdir(folderPath);
+        const jpgFiles = allFiles.filter(file => {
+             return (file.toLowerCase().endsWith('.jpg') || file.toLowerCase().endsWith('.jpeg')) && !file.startsWith('.');
+        });
+
+        if (jpgFiles.length === 0) return { success: true, message: "No se encontraron imágenes JPG." };
+
+        let processedCount = 0;
+        const totalFiles = jpgFiles.length; // Guardamos el total
+
+        for (let i = 0; i < totalFiles; i++) {
+            const fileName = jpgFiles[i];
+            const inputFilePath = path.join(folderPath, fileName);
+            console.log(`Procesando: ${fileName}...`);
+
+            // Calculamos el porcentaje actual
+            const percent = Math.round(((i + 1) / totalFiles) * 100);
+            
+            // Enviamos el mensaje a la ventana principal
+            mainWindow.webContents.send('status:update', {
+                file: fileName, // El nombre del fichero actual
+                percent: percent // El porcentaje completado
+            });
+
+            // --- LÓGICA CONDICIONAL SEGÚN EL MODO ---
+            if (saveMode === 'new') {
+                // === MODO SEGURO: CREAR COPIA ===
+                // 1. Calcular nuevo nombre (ej: imagen.jpg -> imagen_resized.jpg)
+                const ext = path.extname(fileName); // .jpg
+                const namePart = path.basename(fileName, ext); // imagen
+                const newFileName = `${namePart}_resized${ext}`;
+                const outputFilePath = path.join(folderPath, newFileName);
+
+                // 2. Procesar y guardar directamente al nuevo nombre. No hay que borrar nada.
+                await sharp(inputFilePath)
+                    .resize({ width: dimension, height: dimension, fit: 'inside', withoutEnlargement: true })
+                    .jpeg({ quality: 90 })
+                    .toFile(outputFilePath);
+
+            } else {
+                 // === MODO DESTRUCTIVO: SOBRESCRIBIR (La lógica anterior) ===
+                 const tempOutputFilePath = path.join(folderPath, `temp_${fileName}`);
+                 
+                 // 1. Guardar en temporal
+                 await sharp(inputFilePath)
+                     .resize({ width: dimension, height: dimension, fit: 'inside', withoutEnlargement: true })
+                     .jpeg({ quality: 90 })
+                     .toFile(tempOutputFilePath);
+
+                 // 2. "Baile" de sustitución
+                 await fsPromises.unlink(inputFilePath); // Borrar original
+                 await fsPromises.rename(tempOutputFilePath, inputFilePath); // Renombrar temporal
+            }
+            // -----------------------------------------
+            
+            processedCount++;
+        }
+
+        const modeText = saveMode === 'new' ? 'creadas como copias nuevas' : 'sobrescritas';
+        return { success: true, message: `Se han procesado ${processedCount} imágenes (${modeText}).` };
+
+    } catch (error) {
+        console.error("Error en redimensionado:", error);
+        // Limpieza de temporales (solo necesaria si se usó el modo overwrite y falló a medias)
+        try {
+             const files = await fsPromises.readdir(folderPath);
+             for (const f of files) { if (f.startsWith('temp_')) await fsPromises.unlink(path.join(folderPath, f)); }
+        } catch(e) {} 
+        return { success: false, error: `Error técnico: ${error.message}` };
+    }
 });

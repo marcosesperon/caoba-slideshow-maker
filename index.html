@@ -1,15 +1,23 @@
 <!DOCTYPE html>
 <html data-theme="autumn">
 <head>
-    <title>CAOBA Slideshow Maker</title>
+    <title>CAOBA</title>
     <link rel="stylesheet" href="assets/style.css" />
 </head>
-<body>
-  <div class="flex justify-center glass sticky p-2 top-0 z-2">
-    <h2 class="font-title text-2xl md:text-3xl lg:text-4xl font-bold text-center">CAOBA Slideshow Maker</h2>
-    <div class="badge badge-sm ml-1">1.0.2</div>
+<body class="h-screen relative flex flex-col">
+
+  <div class="flex flex-col justify-center glass sticky p-2 top-0 z-2">
+    <div class="flex items-center">
+      <h2 class="font-title text-2xl md:text-3xl lg:text-4xl font-bold text-center">CAOBA</h2>
+      <div class="badge badge-sm ml-1">1.0.3</div>
+    </div>
+    <div class="tabs tabs-box">
+      <input type="radio" name="tab_slideshow" data-target="section-slideshow" class="tab nav-btn" aria-label="Slideshow" checked="checked" />
+      <input type="radio" name="tab_redimensionar" data-target="section-redimensionar" class="tab nav-btn" aria-label="Redimensionar" />
+    </div>
   </div>
-    <div class="gap-4 p-6 max-w-3xl mx-auto">
+
+    <div id="section-slideshow" class="app-section grow gap-4 p-6 max-w-3xl">
         
         <fieldset class="fieldset bg-base-200 border-base-300 rounded-box border p-4">
           <legend class="fieldset-legend">Origen de las Imágenes</legend>
@@ -92,9 +100,55 @@
                 <input type="text" id="destPath" class="input grow join-item" placeholder="Ruta y nombre del archivo de salida (.mp4)..." readonly>
                 <button id="btnSelectDest" class="btn join-item bg-primary"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg></button>
             </div>
-        </div>
+        </fieldset>
 
-        <div class="flex justify-center items-center py-2 px-8">
+    </div>
+
+    <div id="section-redimensionar" class="app-section grow gap-4 p-6 max-w-3xl hidden">
+
+      <fieldset class="fieldset bg-base-200 border-base-300 rounded-box border p-4">
+          <legend class="fieldset-legend">Origen de las Imágenes</legend>
+            <span class="text-accent">Selecciona una carpeta. Todas las imágenes JPG dentro se modificarán.</span>
+            <div class="join">
+                <input type="text" class="input grow join-item" id="resizerFolderPath" placeholder="Selecciona la carpeta con los JPG..." readonly>
+                <button id="btnSelectResizerFolder" class="btn join-item bg-primary"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h5l2 3h9a2 2 0 0 1 2 2v2M19 15v6M16 18h6"/></svg></button>
+            </div>
+        </fieldset>
+
+        <fieldset class="fieldset bg-base-200 border-base-300 rounded-box border p-4">
+          <legend class="fieldset-legend">Tamaño Máximo</legend>
+            <span class="text-accent">Indica el tamaño máximo en píxeles (ancho o alto). La imagen mantendrá su proporción.</span>
+            <div class="join">
+              <input type="number" id="resizeDimension" class="input grow" value="2000" min="100" step="20" placeholder="Ej: 1000">
+            </div>
+        </fieldset>
+
+        <fieldset class="fieldset bg-base-200 border-base-300 rounded-box border p-4">
+          <legend class="fieldset-legend">Modo de Guardado</legend>
+            <div class="radio-group text-xs">
+              <div class="flex flex-col mb-2">
+                <label class="radio-option">
+                    <input type="radio" class="radio" name="resizeMode" value="new" checked>
+                    <span class="ml-2">Guardar como copias nuevas (Seguro)</span>
+                </label>
+                <span class="text-accent ml-4 pl-4"">Se creará un archivo nuevo (ej: imagen_resized.jpg). El original no se toca.</span>
+            </div>
+            <div class="flex flex-col">
+                <label class="radio-option">
+                    <input type="radio" class="radio" name="resizeMode" value="overwrite">
+                    <span class="ml-2">Sobrescribir archivos originales (Destructivo)</span>
+                </label>
+                 <span class="text-warning ml-4 pl-4"">⚠️ Cuidado: Tus fotos originales serán reemplazadas permanentemente.</span>
+            </div>
+            </div>
+        </fieldset>
+
+    </div>
+
+
+    <footer class="glass sticky bottom-0 p-4 text-center text-sm text-secondary">
+       
+      <div class="flex justify-center items-center py-2 px-8">
           <progress id="progressBar" class="progress progress-success" value="0" max="100"></progress>
           <div id="progressText" class="text-xs ml-2">0%</div>
         </div>
@@ -103,15 +157,28 @@
           <div id="status" class="hidden"><span id="statusText"></span></div>
         </div>
 
-        <div class="flex justify-center py-2 mx-4">
-          <button id="btnCancel" class="btn btn-secondary grow" style="display: none;">CANCELAR</button>
+        <div id="section-slideshow-actions" class="app-section">
+
+          <div class="flex justify-center py-2 mx-4">
+            <button id="btnCancel" class="btn btn-secondary grow" style="display: none;">CANCELAR</button>
+          </div>
+          <div class="flex justify-center glass sticky inset-x-0 bottom-0">
+            <div class="grow flex py-2 mx-4">
+              <button id="btnGenerate" class="btn btn-primary grow">GENERAR VIDEO</button>
+            </div>
+          </div>
+
         </div>
-        <div class="flex justify-center glass sticky inset-x-0 bottom-0">
-          <div class="grow flex py-2 mx-4">
-            <button id="btnGenerate" class="btn btn-primary grow">GENERAR VIDEO</button>
+
+        <div id="section-redimensionar-actions" class="app-section hidden">
+          <div class="flex justify-center glass sticky inset-x-0 bottom-0">
+            <div class="grow flex py-2 mx-4">
+              <button id="btnStartResize" class="btn btn-primary grow">REDIMENSIONAR</button>
+            </div>
           </div>
         </div>
-    </div>
+
+    </footer>
 
     <script src="renderer.js"></script>
 </body>

@@ -1,5 +1,8 @@
+const navButtons = document.querySelectorAll('.nav-btn');
+const sections = document.querySelectorAll('.app-section');
+
+
 const btnFolder = document.getElementById('btnSelectFolder');
-// NUEVO: Botón de destino
 const btnSelectDest = document.getElementById('btnSelectDest'); 
 const btnAddMusic = document.getElementById('btnAddMusic');
 const btnGenerate = document.getElementById('btnGenerate');
@@ -16,6 +19,41 @@ const fileListPreview = document.getElementById('fileListPreview');
 
 const progressBar = document.getElementById('progressBar');
 const progressText = document.getElementById('progressText');
+
+
+// Referencias de la nueva sección Resizer
+const btnSelectResizerFolder = document.getElementById('btnSelectResizerFolder');
+const resizerFolderPathInput = document.getElementById('resizerFolderPath');
+const resizeDimensionInput = document.getElementById('resizeDimension');
+const btnStartResize = document.getElementById('btnStartResize');
+
+
+// --- LÓGICA DE NAVEGACIÓN (Añadir esto antes de los Event Listeners existentes) ---
+
+navButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        // 1. Quitar clase active de todos los botones y estilos
+        navButtons.forEach(b => {
+            b.checked = false;
+        });
+        // 2. Ocultar todas las secciones
+        sections.forEach(s => s.classList.add('hidden') );
+
+        // 3. Activar botón actual
+        btn.checked = true;
+        
+        // 4. Mostrar sección objetivo
+        const targetId = btn.getAttribute('data-target');
+        document.getElementById(targetId).classList.remove('hidden');
+        document.getElementById(targetId + '-actions').classList.remove('hidden');
+        
+        // Limpiar estado al cambiar
+        statusText.innerText = "";
+    });
+});
+
+
+
 
 let totalPhotos = 0;
 let musicTracks = []; 
@@ -328,3 +366,83 @@ btnGenerate.addEventListener('click', async () => {
 });
 
 updateUIState();
+
+
+
+
+// --- NUEVOS LISTENERS PARA LA SECCIÓN RESIZER (Añadir al final) ---
+
+btnSelectResizerFolder.addEventListener('click', async () => {
+    const path = await window.api.selectFolder();
+    if (path) {
+        resizerFolderPathInput.value = path;
+        statusText.innerText = "Carpeta seleccionada. Listo para redimensionar.";
+        statusDiv.className = "alert alert-soft";
+    }
+});
+
+btnStartResize.addEventListener('click', async () => {
+    const folderPath = resizerFolderPathInput.value;
+    const dimension = resizeDimensionInput.value;
+
+    const saveMode = document.querySelector('input[name="resizeMode"]:checked').value;
+
+    statusDiv.className = "alert alert-soft";
+
+    if (!folderPath) {
+        statusText.innerText = "Selecciona una carpeta primero.";
+        statusDiv.classList.add("alert-error");
+        return;
+    }
+    if (!dimension || dimension < 50) {
+        statusText.innerText = "Indica un tamaño válido (mínimo 50px).";
+        statusDiv.classList.add("alert-error");
+        return;
+    }
+
+    btnStartResize.disabled = true;
+    btnStartResize.innerText = "⏳ Procesando imágenes...";
+
+    progressBar.value = 0;
+    progressText.innerText = "0%";
+    statusText.innerText = `⏳ Iniciando...`;
+
+    // NUEVO: Mensaje de estado diferente según el modo
+    if (saveMode === 'overwrite') {
+        statusText.innerText = "⚠️ Procesando y SOBRESCRIBIENDO originales... No cierres la aplicación.";
+    } else {
+        statusText.innerText = "Procesando y creando copias nuevas... Por favor espera.";
+    }
+
+    try {
+        // Llamada al nuevo API
+        const result = await window.api.resizeImages(folderPath, dimension, saveMode);
+
+        if (result.success) {
+            statusText.innerText = `¡Proceso completado!\n${result.message}`;
+            statusDiv.classList.add("alert-success");
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (err) {
+        statusText.innerText = `Error:\n${err.message}`;
+         statusDiv.className = "alert alert-soft alert-error";
+    } finally {
+        btnStartResize.disabled = false;
+        btnStartResize.innerText = "EMPEZAR REDIMENSIONADO";
+    }
+});
+
+// NUEVO: Listener para actualizaciones de estado (usado por el Redimensionador)
+window.api.onStatusUpdate((data) => {
+    // 1. Si el mensaje trae porcentaje, actualizamos la barra de progreso
+    if (data.percent !== undefined) {
+        progressBar.value = data.percent;
+        progressText.innerText = Math.round(data.percent) + "%";
+    }
+
+    // 2. NUEVO: Actualizamos el texto de estado con el fichero
+    // Usamos un icono de reloj de arena para indicar proceso
+    statusText.innerText = `⏳ Procesando imagen: ${data.file}`;
+
+});

@@ -5,10 +5,13 @@ contextBridge.exposeInMainWorld('api', {
     selectFile: () => ipcRenderer.invoke('dialog:select-file'),
     saveFile: () => ipcRenderer.invoke('dialog:save-file'),
     
-    // CAMBIO: Esta función ahora recibe el modo de ordenación
     scanAndSortFiles: (folder, sortMode) => ipcRenderer.invoke('util:scan-and-sort', folder, sortMode),
     
     generateVideoMultiAudio: (data) => ipcRenderer.invoke('action:generate-multi', data),
     onProgress: (callback) => ipcRenderer.on('conversion:progress', (_event, value) => callback(value)),
-    cancelGeneration: () => ipcRenderer.invoke('action:cancel')
+    cancelGeneration: () => ipcRenderer.invoke('action:cancel'),
+
+    resizeImages: (folder, dimension, saveMode) => ipcRenderer.invoke('action:resize-images', folder, dimension, saveMode),
+    onStatusUpdate: (callback) => ipcRenderer.on('status:update', (_event, data) => callback(data))
 });
+
